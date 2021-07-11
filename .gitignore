@@ -1,0 +1,8 @@
+# temp
+temp*
+
+# VSCode
+.vscode
+
+# PyCache
+.pyc
