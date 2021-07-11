@@ -15,9 +15,7 @@ def create_modelv2(model_factory: Callable[[], tf.keras.Model]) -> Type[TFModelV
             model_config: Dict[str, Any],
             name: str,
         ):
-            super().__init__(
-                self, obs_space, action_space, num_outputs, model_config, name
-            )
+            super().__init__(obs_space, action_space, num_outputs, model_config, name)
             self._model = model_factory()
 
         def forward(

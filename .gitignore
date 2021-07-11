@@ -5,4 +5,4 @@ temp*
 .vscode
 
 # PyCache
-.pyc
+*.pyc

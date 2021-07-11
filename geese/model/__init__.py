@@ -1,1 +1,1 @@
-from geese.model.model import TorusModel
+from geese.model.model import BaseModel
