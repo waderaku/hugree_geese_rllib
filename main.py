@@ -1,15 +1,16 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
+import gym
 import ray
 import tensorflow as tf
 from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.rllib.models import ModelCatalog
 from ray.tune.registry import register_env
-import gym
-from geese.model import TorusModel
+
 from geese.env import SoloEnv
+from geese.model import TorusModel
 from geese.utils.modelv2wrapper import create_modelv2
 
 
