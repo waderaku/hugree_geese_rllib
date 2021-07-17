@@ -61,7 +61,7 @@ class Parameter:
         }
 
     @property
-    def tune_arguments(self):
+    def tune_arguments(self) -> Dict[str, Any]:
         run_or_experiment = PPOTrainer
         num_samples = self.num_samples
         config = {
