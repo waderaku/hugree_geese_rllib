@@ -33,9 +33,10 @@ class SoloEnv(gym.Env):
         )
 
     def reset(self) -> np.ndarray:
-        raise self._env.reset()[0]
+        return self._env.reset()[0]
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
+        action = ACTIONLIST[action]
         pre_done = [
             self._env.dena_env.env.state[p]["status"] != "ACTIVE"
             for p in range(NUM_GEESE)
@@ -55,8 +56,8 @@ class SoloEnv(gym.Env):
     @property
     def observation_space(self) -> gym.spaces.Space:
         return gym.spaces.Box(
-            low=np.zeros((NUM_CHANNELS, FIELD_HEIGHT, FIELD_WIDTH)),
-            high=np.ones((NUM_CHANNELS, FIELD_HEIGHT, FIELD_WIDTH)),
+            low=np.zeros((FIELD_HEIGHT, FIELD_WIDTH, NUM_CHANNELS)),
+            high=np.ones((FIELD_HEIGHT, FIELD_WIDTH, NUM_CHANNELS)),
         )
 
     @property
