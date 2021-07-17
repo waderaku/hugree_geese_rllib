@@ -30,7 +30,7 @@ class Env:
 
     def reset(self) -> List[np.ndarray]:
         self._dena_env.reset()
-        return [self._dena_env.observation(p) for p in range(NUM_GEESE)]
+        return self.get_observations()
 
     def step(
         self, actions: List[Action]
@@ -79,7 +79,7 @@ class Env:
             self._dena_env.reset()
 
         # Gooseごとの観測
-        observation = [self._dena_env.observation(p) for p in range(NUM_GEESE)]
+        observation = self.get_observations()
         done = done.astype(np.bool).tolist()
         return observation, reward, done
 
@@ -146,3 +146,9 @@ class Env:
     @property
     def dena_env(self) -> DenaEnv:
         return self._dena_env
+
+    def get_observations(self) -> List[np.ndarray]:
+        return [
+            np.transpose(self._dena_env.observation(p), (1, 2, 0))
+            for p in range(NUM_GEESE)
+        ]
