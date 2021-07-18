@@ -1,8 +1,11 @@
 from pathlib import Path
 import sys
-from typing import Dict, List
+from typing import Dict, List, Any
 import numpy as np
 import tensorflow as tf
+
+import ray
+from ray.rllib.agents.ppo import PPOTrainer
 
 # Input for Neural Network
 def centerize(b: np.ndarray):
@@ -79,3 +82,17 @@ def agent(obs_dict, config_dict):
 
     actions = ["NORTH", "SOUTH", "WEST", "EAST"]
     return actions[np.argmax(y_pred)]
+
+
+def load_agent(
+    path: str,
+    config: Dict[str, Any],
+) -> PPOTrainer:
+    ray.init(num_gpus=config["num_gpus"])
+    if "env" not in config:
+        raise KeyError("Config must contains key 'env'")
+    if "model" not in config:
+        raise KeyError("Config must contains key 'model'")
+    agent = PPOTrainer(config=config)
+    agent.restore(path)
+    return agent
