@@ -42,6 +42,7 @@ class Parameter:
     # RLlib Parameter
     num_samples: int = 8
     num_workers: int = 1
+    stop: Dict[str, int] = {"time_steps_total": 100_000}
 
     @property
     def env_parameter(self) -> Dict[str, Any]:
@@ -61,9 +62,7 @@ class Parameter:
         }
 
     @property
-    def tune_arguments(self) -> Dict[str, Any]:
-        run_or_experiment = PPOTrainer
-        num_samples = self.num_samples
+    def config(self) -> Dict[str, Any]:
         config = {
             "framework": "tf",
             "model": {"conv_filters": self.conv_filters},
@@ -76,6 +75,13 @@ class Parameter:
             ),
             "num_workers": self.num_workers,
         }
+        return config
+
+    @property
+    def tune_arguments(self) -> Dict[str, Any]:
+        run_or_experiment = PPOTrainer
+        num_samples = self.num_samples
+        config = self.config
         pb2_scheduler = PB2(
             time_attr="timesteps_total",
             metric="episode_reward_mean",
@@ -91,15 +97,17 @@ class Parameter:
             synch=False,
         )
         arguments = {
+            "stop": self.stop,
             "run_or_experiment": run_or_experiment,
             "scheduler": pb2_scheduler,
             "config": config,
             "num_samples": num_samples,
+            "checkpoint_at_end": True,
         }
         return arguments
 
 
-def get_env_factory(parameter: Parameter) -> Callable[[], gym.Env]:
+def get_env_factory(parameter: Parameter) -> Callable[[Dict[str, Any]], gym.Env]:
     def env_factory(_: Dict[str, Any]) -> gym.Env:
         return SoloEnv(**parameter.env_parameter)
 
@@ -112,4 +120,10 @@ if __name__ == "__main__":
     parameter = Parameter(**param_json)
     env_factory = get_env_factory(parameter)
     register_env(ENV_NAME, env_factory)
-    tune.run(**parameter.tune_arguments)
+    analysis = tune.run(**parameter.tune_arguments)
+    checkpoints = analysis.get_trial_checkpoints_paths(
+        trial=analysis.get_best_trial("episode_reward_mean", mode="max"),
+        metric="episode_reward_mean",
+    )
+    checkpoint_path = checkpoints[0][0]
+    print(f"Best trial's checkpoint path: {checkpoint_path}")
