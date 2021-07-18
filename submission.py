@@ -1,11 +1,123 @@
-from pathlib import Path
+import json
+import random
 import sys
-from typing import Dict, List, Any
-import numpy as np
-import tensorflow as tf
+from dataclasses import MISSING, dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
+import gym
+import numpy as np
 import ray
+import tensorflow as tf
+from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
+from ray.tune.registry import register_env
+from ray.tune.schedulers.pb2 import PB2
+
+from geese.constants import RewardFunc
+from geese.env import SoloEnv
+
+MODEL_NAME = "model_name"
+ENV_NAME = "env_name"
+
+
+@dataclass
+class Parameter:
+    conv_filters: List[List[Union[int, List[int]]]] = field(
+        default_factory=lambda: [[16, [3, 3], 1], [32, [3, 3], 1], [64, [7, 11], 1]]
+    )
+    reward_func: str = "RAW"
+    reward_list: Optional[List[float]] = field(
+        default_factory=lambda: [-1, -0.5, 0.5, 1]
+    )
+    scale_flg: bool = False
+    press_flg: bool = True
+    max_reward_value: float = 20099
+    # PPOParameter
+    learning_rate: List[float] = field(
+        default_factory=lambda: [1e-8, 1e-3], default=MISSING
+    )
+    batch_size: List[int] = field(default_factory=lambda: [128, 512], default=MISSING)
+    param_lambda: List[float] = field(
+        default_factory=lambda: [0.9, 1.0], default=MISSING
+    )
+    clip_param: List[float] = field(default_factory=lambda: [0.1, 0.5], default=MISSING)
+    # PB2Parameter
+    perturbation_interval: int = 1000
+    # RLlib Parameter
+    num_samples: int = 8
+    num_workers: int = 1
+    stop: Dict[str, int] = {"time_steps_total": 100_000}
+
+    @property
+    def env_parameter(self) -> Dict[str, Any]:
+        if self.reward_func == "RAW":
+            reward_func = RewardFunc.RAW
+        elif self.reward_func == "RANK":
+            reward_func = RewardFunc.RANK
+        else:
+            raise ValueError("Unexpected Reward Function")
+
+        return {
+            "reward_func": reward_func,
+            "reward_list": self.reward_list,
+            "scale_flg": self.scale_flg,
+            "press_flg": self.press_flg,
+            "max_reward_value": self.max_reward_value,
+        }
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        config = {
+            "framework": "tf",
+            "model": {"conv_filters": self.conv_filters},
+            "env": ENV_NAME,
+            "lambda": tune.sample_from(lambda _: random.uniform(*self.param_lambda)),
+            "clip_param": tune.sample_from(lambda _: random.uniform(*self.clip_param)),
+            "lr": tune.sample_from(lambda _: random.uniform(*self.learning_rate)),
+            "train_batch_size": tune.sample_from(
+                lambda _: random.randint(*self.batch_size)
+            ),
+            "num_workers": self.num_workers,
+        }
+        return config
+
+    @property
+    def tune_arguments(self) -> Dict[str, Any]:
+        run_or_experiment = PPOTrainer
+        num_samples = self.num_samples
+        config = self.config
+        pb2_scheduler = PB2(
+            time_attr="timesteps_total",
+            metric="episode_reward_mean",
+            mode="max",
+            perturbation_interval=self.perturbation_interval,
+            quantile_fraction=0.25,
+            hyperparam_bounds={
+                "lambda": self.param_lambda,
+                "clip_param": self.clip_param,
+                "lr": self.learning_rate,
+                "train_batch_size": self.batch_size,
+            },
+            synch=False,
+        )
+        arguments = {
+            "stop": self.stop,
+            "run_or_experiment": run_or_experiment,
+            "scheduler": pb2_scheduler,
+            "config": config,
+            "num_samples": num_samples,
+            "checkpoint_at_end": True,
+        }
+        return arguments
+
+
+def get_env_factory(parameter: Parameter) -> Callable[[Dict[str, Any]], gym.Env]:
+    def env_factory(_: Dict[str, Any]) -> gym.Env:
+        return SoloEnv(**parameter.env_parameter)
+
+    return env_factory
+
 
 # Input for Neural Network
 def centerize(b: np.ndarray):
@@ -51,14 +163,39 @@ def make_input(obses: List[Dict]):
     return b
 
 
-p = Path("/kaggle_simulations/agent/")
-if p.exists():
-    sys.path.append(str(p))
-else:
-    p = Path("__file__").resolve().parent
+def load_agent(
+    path: str,
+    config: Dict[str, Any],
+) -> PPOTrainer:
+    ray.init(num_gpus=config["num_gpus"])
+    if "env" not in config:
+        raise KeyError("Config must contains key 'env'")
+    if "model" not in config:
+        raise KeyError("Config must contains key 'model'")
+    agent = PPOTrainer(config=config)
+    agent.restore(path)
+    return agent
 
-model: tf.keras.models.Model = tf.keras.models.load_model(str(p / "my_model.h5"))
+
+# p = Path("/kaggle_simulations/agent/")
+# if p.exists():
+#     sys.path.append(str(p))
+# else:
+#     p = Path("__file__").resolve().parent
+path = ""
+parameter = Parameter()
+env_factory = get_env_factory(parameter)
+register_env(ENV_NAME, env_factory)
+# model: tf.keras.models.Model = tf.keras.models.load_model(str(p / "my_model.h5"))
 obses = []
+_agent = load_agent(
+    path,
+    {
+        "num_gpus": 0,
+        "env": ENV_NAME,
+        "model": {"conv_filters": [[16, [3, 3], 1], [32, [3, 3], 1], [64, [7, 11], 1]]},
+    },
+)
 
 
 def agent(obs_dict, config_dict):
@@ -78,21 +215,7 @@ def agent(obs_dict, config_dict):
         [obstacles[0, 2, 5], obstacles[0, 4, 5], obstacles[0, 3, 4], obstacles[0, 3, 6]]
     )
 
-    y_pred = model.predict(X_test) - obstacles
+    y_pred = _agent.compute_action(X_test) - obstacles
 
     actions = ["NORTH", "SOUTH", "WEST", "EAST"]
     return actions[np.argmax(y_pred)]
-
-
-def load_agent(
-    path: str,
-    config: Dict[str, Any],
-) -> PPOTrainer:
-    ray.init(num_gpus=config["num_gpus"])
-    if "env" not in config:
-        raise KeyError("Config must contains key 'env'")
-    if "model" not in config:
-        raise KeyError("Config must contains key 'model'")
-    agent = PPOTrainer(config=config)
-    agent.restore(path)
-    return agent
