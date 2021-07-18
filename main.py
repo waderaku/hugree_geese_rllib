@@ -30,7 +30,7 @@ class Parameter:
     max_reward_value: float = 20099
     # PPOParameter
     learning_rate: List[float] = field(
-        default_factory=lambda: [1e-3, 1e-6], default=MISSING
+        default_factory=lambda: [1e-8, 1e-3], default=MISSING
     )
     batch_size: List[int] = field(default_factory=lambda: [128, 512], default=MISSING)
     param_lambda: List[float] = field(
@@ -88,7 +88,7 @@ class Parameter:
                 "lr": self.learning_rate,
                 "train_batch_size": self.batch_size,
             },
-            synch=True,
+            synch=False,
         )
         arguments = {
             "run_or_experiment": run_or_experiment,
@@ -107,10 +107,9 @@ def get_env_factory(parameter: Parameter) -> Callable[[], gym.Env]:
 
 
 if __name__ == "__main__":
-    # with open("./conf/parameter.json", "r") as f:
-    #     param_json = json.load(f)
-    # parameter = Parameter(**param_json)
-    parameter = Parameter()
+    with open("./conf/parameter.json", "r") as f:
+        param_json = json.load(f)
+    parameter = Parameter(**param_json)
     env_factory = get_env_factory(parameter)
     register_env(ENV_NAME, env_factory)
     tune.run(**parameter.tune_arguments)

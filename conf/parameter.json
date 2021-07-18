@@ -1,5 +1,4 @@
 {
-    "num_samples": 8,
     "conv_filters": [
         [
             16,
@@ -37,8 +36,8 @@
     "press_flg": true,
     "max_reward_value": 20099,
     "learning_rate": [
-        0.001,
-        1e-06
+        1e-08,
+        0.001
     ],
     "batch_size": [
         128,
@@ -53,5 +52,6 @@
         0.5
     ],
     "perturbation_interval": 1000,
-    "num_workers": 2
+    "num_samples": 8,
+    "num_workers": 0
 }
