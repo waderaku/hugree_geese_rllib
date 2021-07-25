@@ -1,14 +1,10 @@
-import json
 import random
-import sys
 from dataclasses import MISSING, dataclass, field
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import gym
 import numpy as np
 import ray
-import tensorflow as tf
 from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.tune.registry import register_env
@@ -46,8 +42,10 @@ class Parameter:
     perturbation_interval: int = 1000
     # RLlib Parameter
     num_samples: int = 8
-    num_workers: int = 1
-    stop: Dict[str, int] = {"time_steps_total": 100_000}
+    num_workers: int = 0
+    stop: Dict[str, int] = field(
+        default_factory=lambda: {"time_steps_total": 100_000}, default=MISSING
+    )
 
     @property
     def env_parameter(self) -> Dict[str, Any]:
@@ -168,6 +166,7 @@ def load_agent(
     config: Dict[str, Any],
 ) -> PPOTrainer:
     ray.init(num_gpus=config["num_gpus"])
+    # ray.init()
     if "env" not in config:
         raise KeyError("Config must contains key 'env'")
     if "model" not in config:
@@ -182,7 +181,9 @@ def load_agent(
 #     sys.path.append(str(p))
 # else:
 #     p = Path("__file__").resolve().parent
-path = ""
+print("aaa")
+
+path = "/root/ray_results/PPO_2021-07-18_14-33-59/PPO_env_name_c0dc1_00007_7_clip_param=0.35753,lambda=0.9926,lr=0.00047974,train_batch_size=409_2021-07-18_14-34-00/checkpoint_000003/checkpoint-3"
 parameter = Parameter()
 env_factory = get_env_factory(parameter)
 register_env(ENV_NAME, env_factory)
@@ -200,22 +201,22 @@ _agent = load_agent(
 
 def agent(obs_dict, config_dict):
     obses.append(obs_dict)
-
     X_test = make_input(obses)
     X_test = np.transpose(X_test, (1, 2, 0))
-    X_test = X_test.reshape(-1, 7, 11, 17)  # channel last.
+    # X_test = X_test.reshape(-1, 7, 11, 17)  # channel last.
 
     # avoid suicide
-    obstacles = X_test[:, :, :, [8, 9, 10, 11, 12]].max(axis=3) - X_test[
-        :, :, :, [4, 5, 6, 7]
-    ].max(
-        axis=3
-    )  # body + opposite_side - my tail
-    obstacles = np.array(
-        [obstacles[0, 2, 5], obstacles[0, 4, 5], obstacles[0, 3, 4], obstacles[0, 3, 6]]
-    )
+    # obstacles = X_test[:, :, [8, 9, 10, 11, 12]].max(axis=2) - X_test[
+    #     :, :, [4, 5, 6, 7]
+    # ].max(
+    #     axis=2
+    # )  # body + opposite_side - my tail
+    # obstacles = np.array(
+    #     [obstacles[0, 2, 5], obstacles[0, 4, 5], obstacles[0, 3, 4], obstacles[0, 3, 6]]
+    # )
 
-    y_pred = _agent.compute_action(X_test) - obstacles
+    y_pred = _agent.compute_action(X_test)
+    # - obstacles
 
     actions = ["NORTH", "SOUTH", "WEST", "EAST"]
     return actions[np.argmax(y_pred)]

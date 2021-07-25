@@ -42,7 +42,9 @@ class Parameter:
     # RLlib Parameter
     num_samples: int = 8
     num_workers: int = 1
-    stop: Dict[str, int] = {"time_steps_total": 100_000}
+    stop: Dict[str, int] = field(
+        default_factory=lambda: {"timesteps_total": 10_000_000}, default=MISSING
+    )
 
     @property
     def env_parameter(self) -> Dict[str, Any]:
