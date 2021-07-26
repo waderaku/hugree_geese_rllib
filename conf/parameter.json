@@ -49,9 +49,12 @@
     ],
     "clip_param": [
         0.1,
-        0.3
+        0.5
     ],
     "perturbation_interval": 1000,
-    "num_samples": 16,
-    "num_workers": 0
+    "num_samples": 8,
+    "num_workers": 1,
+    "stop": {
+        "timesteps_total": 1000
+    }
 }

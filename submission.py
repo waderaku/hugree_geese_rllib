@@ -9,7 +9,6 @@ from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.tune.registry import register_env
 from ray.tune.schedulers.pb2 import PB2
-
 from geese.constants import RewardFunc
 from geese.env import SoloEnv
 
@@ -67,7 +66,7 @@ class Parameter:
     @property
     def config(self) -> Dict[str, Any]:
         config = {
-            "framework": "tf",
+            "framework": "tf2",
             "model": {"conv_filters": self.conv_filters},
             "env": ENV_NAME,
             "lambda": tune.sample_from(lambda _: random.uniform(*self.param_lambda)),
@@ -181,42 +180,30 @@ def load_agent(
 #     sys.path.append(str(p))
 # else:
 #     p = Path("__file__").resolve().parent
-print("aaa")
 
-path = "/root/ray_results/PPO_2021-07-18_14-33-59/PPO_env_name_c0dc1_00007_7_clip_param=0.35753,lambda=0.9926,lr=0.00047974,train_batch_size=409_2021-07-18_14-34-00/checkpoint_000003/checkpoint-3"
+path = "./checkpoint/checkpoint_000294/checkpoint-294"
+# path = "/root/ray_results/PPO_2021-07-25_16-29-03/PPO_env_name_fc921_00000_0_2021-07-25_16-29-03/checkpoint_001957/checkpoint-1957"
 parameter = Parameter()
 env_factory = get_env_factory(parameter)
 register_env(ENV_NAME, env_factory)
-# model: tf.keras.models.Model = tf.keras.models.load_model(str(p / "my_model.h5"))
 obses = []
 _agent = load_agent(
     path,
     {
+        "framework": "tf2",
         "num_gpus": 0,
         "env": ENV_NAME,
         "model": {"conv_filters": [[16, [3, 3], 1], [32, [3, 3], 1], [64, [7, 11], 1]]},
     },
 )
+actions = ["NORTH", "SOUTH", "WEST", "EAST"]
 
 
-def agent(obs_dict, config_dict):
+def agent(obs_dict: Dict[str, Any], _config_dict: Dict[str, Any]):
     obses.append(obs_dict)
     X_test = make_input(obses)
     X_test = np.transpose(X_test, (1, 2, 0))
-    # X_test = X_test.reshape(-1, 7, 11, 17)  # channel last.
 
-    # avoid suicide
-    # obstacles = X_test[:, :, [8, 9, 10, 11, 12]].max(axis=2) - X_test[
-    #     :, :, [4, 5, 6, 7]
-    # ].max(
-    #     axis=2
-    # )  # body + opposite_side - my tail
-    # obstacles = np.array(
-    #     [obstacles[0, 2, 5], obstacles[0, 4, 5], obstacles[0, 3, 4], obstacles[0, 3, 6]]
-    # )
+    action = _agent.compute_action(X_test)
 
-    y_pred = _agent.compute_action(X_test)
-    # - obstacles
-
-    actions = ["NORTH", "SOUTH", "WEST", "EAST"]
-    return actions[np.argmax(y_pred)]
+    return actions[action]

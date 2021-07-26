@@ -16,18 +16,18 @@ def create_modelv2(model_factory: Callable[[], tf.keras.Model]) -> Type[TFModelV
             name: str,
         ):
             super().__init__(obs_space, action_space, num_outputs, model_config, name)
-            self._model = model_factory()
+            self.base_model = model_factory()
 
         def forward(
             self, input_dict: Dict[str, Any], _state: List[Any], _max_len: Any
         ) -> tf.Tensor:
             obs = input_dict["obs"]
             if isinstance(obs, dict):
-                policy, value = self._model(**obs)
+                policy, value = self.base_model(**obs)
             elif isinstance(obs, tuple):
-                policy, value = self._model(*obs)
+                policy, value = self.base_model(*obs)
             else:
-                policy, value = self._model(obs)
+                policy, value = self.base_model(obs)
             self._value = value
             return policy, list()
 

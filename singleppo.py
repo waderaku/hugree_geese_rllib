@@ -1,13 +1,13 @@
-import json
-import random
+from geese.utils.modelv2wrapper import create_modelv2
+from model.model import Model
 from dataclasses import MISSING, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
-
+from ray.rllib.models import ModelCatalog
 import gym
+import tensorflow as tf
 from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.tune.registry import register_env
-from ray.tune.schedulers.pb2 import PB2
 
 from geese.constants import RewardFunc
 from geese.env import SoloEnv
@@ -29,21 +29,15 @@ class Parameter:
     press_flg: bool = True
     max_reward_value: float = 20099
     # PPOParameter
-    learning_rate: List[float] = field(
-        default_factory=lambda: [1e-8, 1e-3], default=MISSING
-    )
-    batch_size: List[int] = field(default_factory=lambda: [128, 512], default=MISSING)
-    param_lambda: List[float] = field(
-        default_factory=lambda: [0.9, 1.0], default=MISSING
-    )
-    clip_param: List[float] = field(default_factory=lambda: [0.1, 0.5], default=MISSING)
-    # PB2Parameter
-    perturbation_interval: int = 1000
+    learning_rate: float = 5e-6
+    batch_size: int = 512
+    param_lambda: float = 0.9
+    clip_param: float = 0.1
     # RLlib Parameter
-    num_samples: int = 8
-    num_workers: int = 1
+    num_samples: int = 1
+    num_workers: int = 7
     stop: Dict[str, int] = field(
-        default_factory=lambda: {"timesteps_total": 1000}, default=MISSING
+        default_factory=lambda: {"timesteps_total": 10_000_000}, default=MISSING
     )
 
     @property
@@ -67,15 +61,18 @@ class Parameter:
     def config(self) -> Dict[str, Any]:
         config = {
             "framework": "tf2",
-            "model": {"conv_filters": self.conv_filters},
+            # "model": {"conv_filters": self.conv_filters},
+            "model": {
+                "custom_model": MODEL_NAME,
+                "custom_model_config": {},
+            },
             "env": ENV_NAME,
-            "lambda": tune.sample_from(lambda _: random.uniform(*self.param_lambda)),
-            "clip_param": tune.sample_from(lambda _: random.uniform(*self.clip_param)),
-            "lr": tune.sample_from(lambda _: random.uniform(*self.learning_rate)),
-            "train_batch_size": tune.sample_from(
-                lambda _: random.randint(*self.batch_size)
-            ),
+            "lambda": self.param_lambda,
+            "clip_param": self.clip_param,
+            "lr": self.learning_rate,
+            "train_batch_size": self.batch_size,
             "num_workers": self.num_workers,
+            "num_gpus": 0,
         }
         return config
 
@@ -84,24 +81,10 @@ class Parameter:
         run_or_experiment = PPOTrainer
         num_samples = self.num_samples
         config = self.config
-        pb2_scheduler = PB2(
-            time_attr="timesteps_total",
-            metric="episode_reward_mean",
-            mode="max",
-            perturbation_interval=self.perturbation_interval,
-            quantile_fraction=0.25,
-            hyperparam_bounds={
-                "lambda": self.param_lambda,
-                "clip_param": self.clip_param,
-                "lr": self.learning_rate,
-                "train_batch_size": self.batch_size,
-            },
-            synch=False,
-        )
+
         arguments = {
             "stop": self.stop,
             "run_or_experiment": run_or_experiment,
-            "scheduler": pb2_scheduler,
             "config": config,
             "num_samples": num_samples,
             "checkpoint_at_end": True,
@@ -116,12 +99,28 @@ def get_env_factory(parameter: Parameter) -> Callable[[Dict[str, Any]], gym.Env]
     return env_factory
 
 
+def get_model_factory(
+    env_factory: Callable[[Dict[str, Any]], gym.Env]
+) -> Callable[[], tf.keras.models.Model]:
+    env = env_factory(None)
+    obs = env.observation_space.sample()
+    obs = obs[None, :, :, :]
+
+    def model_factory() -> tf.keras.models.Model:
+        model = Model()
+        model.build(obs.shape)
+        return model
+
+    return model_factory
+
+
 if __name__ == "__main__":
-    with open("./conf/parameter.json", "r") as f:
-        param_json = json.load(f)
-    parameter = Parameter(**param_json)
+    parameter = Parameter()
     env_factory = get_env_factory(parameter)
     register_env(ENV_NAME, env_factory)
+    model_factory = get_model_factory(env_factory)
+    model_class = create_modelv2(model_factory)
+    ModelCatalog.register_custom_model(MODEL_NAME, model_class)
     analysis = tune.run(**parameter.tune_arguments)
     checkpoints = analysis.get_trial_checkpoints_paths(
         trial=analysis.get_best_trial("episode_reward_mean", mode="max"),
