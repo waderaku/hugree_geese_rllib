@@ -1,14 +1,14 @@
-import json
 import random
 from dataclasses import MISSING, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import gym
+import numpy as np
+import ray
 from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.tune.registry import register_env
 from ray.tune.schedulers.pb2 import PB2
-
 from geese.constants import RewardFunc
 from geese.env import SoloEnv
 
@@ -41,9 +41,9 @@ class Parameter:
     perturbation_interval: int = 1000
     # RLlib Parameter
     num_samples: int = 8
-    num_workers: int = 1
+    num_workers: int = 0
     stop: Dict[str, int] = field(
-        default_factory=lambda: {"timesteps_total": 1000}, default=MISSING
+        default_factory=lambda: {"time_steps_total": 100_000}, default=MISSING
     )
 
     @property
@@ -116,16 +116,94 @@ def get_env_factory(parameter: Parameter) -> Callable[[Dict[str, Any]], gym.Env]
     return env_factory
 
 
-if __name__ == "__main__":
-    with open("./conf/parameter.json", "r") as f:
-        param_json = json.load(f)
-    parameter = Parameter(**param_json)
-    env_factory = get_env_factory(parameter)
-    register_env(ENV_NAME, env_factory)
-    analysis = tune.run(**parameter.tune_arguments)
-    checkpoints = analysis.get_trial_checkpoints_paths(
-        trial=analysis.get_best_trial("episode_reward_mean", mode="max"),
-        metric="episode_reward_mean",
-    )
-    checkpoint_path = checkpoints[0][0]
-    print(f"Best trial's checkpoint path: {checkpoint_path}")
+# Input for Neural Network
+def centerize(b: np.ndarray):
+    dy, dx = np.where(b[0])
+    centerize_y = (np.arange(0, 7) - 3 + dy[0]) % 7
+    centerize_x = (np.arange(0, 11) - 5 + dx[0]) % 11
+
+    b = b[:, centerize_y, :]
+    b = b[:, :, centerize_x]
+
+    return b
+
+
+def make_input(obses: List[Dict]):
+    b: np.ndarray = np.zeros((17, 7 * 11), dtype=np.float32)
+    obs = obses[-1]
+
+    for p, pos_list in enumerate(obs["geese"]):
+        # head position
+        for pos in pos_list[:1]:
+            b[0 + (p - obs["index"]) % 4, pos] = 1
+        # tip position
+        for pos in pos_list[-1:]:
+            b[4 + (p - obs["index"]) % 4, pos] = 1
+        # whole position
+        for pos in pos_list:
+            b[8 + (p - obs["index"]) % 4, pos] = 1
+
+    # previous head position
+    if len(obses) > 1:
+        obs_prev = obses[-2]
+        for p, pos_list in enumerate(obs_prev["geese"]):
+            for pos in pos_list[:1]:
+                b[12 + (p - obs["index"]) % 4, pos] = 1
+
+    # food
+    for pos in obs["food"]:
+        b[16, pos] = 1
+
+    b = b.reshape(-1, 7, 11)
+    b = centerize(b)
+
+    return b
+
+
+def load_agent(
+    path: str,
+    config: Dict[str, Any],
+) -> PPOTrainer:
+    ray.init(num_gpus=config["num_gpus"])
+    # ray.init()
+    if "env" not in config:
+        raise KeyError("Config must contains key 'env'")
+    if "model" not in config:
+        raise KeyError("Config must contains key 'model'")
+    agent = PPOTrainer(config=config)
+    agent.restore(path)
+    return agent
+
+
+# p = Path("/kaggle_simulations/agent/")
+# if p.exists():
+#     sys.path.append(str(p))
+# else:
+#     p = Path("__file__").resolve().parent
+
+path = "./checkpoint/checkpoint_000294/checkpoint-294"
+# path = "/root/ray_results/PPO_2021-07-25_16-29-03/PPO_env_name_fc921_00000_0_2021-07-25_16-29-03/checkpoint_001957/checkpoint-1957"
+parameter = Parameter()
+env_factory = get_env_factory(parameter)
+register_env(ENV_NAME, env_factory)
+obses = []
+_agent = load_agent(
+    path,
+    {
+        "framework": "tf2",
+        "num_gpus": 0,
+        "env": ENV_NAME,
+        "model": {"conv_filters": [[16, [3, 3], 1], [32, [3, 3], 1], [64, [7, 11], 1]]},
+    },
+)
+actions = ["NORTH", "SOUTH", "WEST", "EAST"]
+
+
+def agent(obs_dict: Dict[str, Any], _config_dict: Dict[str, Any]):
+    obses.append(obs_dict)
+    X_test = make_input(obses)
+    X_test = np.transpose(X_test, (1, 2, 0))
+
+    action = _agent.compute_action(X_test)
+
+    return actions[action]
